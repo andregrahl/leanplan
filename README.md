@@ -134,9 +134,9 @@ the agent writes the proofs, this is the only step that decides whether a
 heuristic is admissible.
 
 `Proofs` depends on mathlib, pinned in `lakefile.toml` to the `v4.30.0` tag.
-The first build fetches and compiles it, which takes a while.  Nothing under
-`Planner/` or `Main.lean` imports mathlib, so `lake build planner` does not pay
-that cost.
+Lake resolves every dependency before building anything, so both commands clone
+mathlib.  Only `lake build Proofs` compiles it, which is the slow part, since
+nothing under `Planner/` or `Main.lean` imports it.
 
 ## Example: Adding a new domain
 
