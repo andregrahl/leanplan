@@ -1,5 +1,9 @@
-# Lean build output.  planner/.lake holds mathlib and is several gigabytes.
+# Lean build output.
 .lake/
+planner/.lake/
 
-# Where the README suggests putting the IPC benchmarks.
-benchmarks/
+*~
+.venv/
+.pytest_cache/
+__pycache__/
+*.py[cod]
