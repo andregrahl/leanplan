@@ -7,3 +7,9 @@ planner/.lake/
 .pytest_cache/
 __pycache__/
 *.py[cod]
+
+
+# Planner output
+*.plan
+plan.txt
+*.soln
