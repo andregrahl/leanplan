@@ -58,42 +58,6 @@ theorem word_test (w : UInt64) (b : Nat) (hb : b < 64) :
         UInt64.toBitVec_inj.mp (by simpa using key)
       simp [heq]
 
-/-- States with the same word count are equal when every addressable bit agrees. -/
-theorem ext_test {a b : State} (hsize : a.words.size = b.words.size)
-    (htest : ∀ f, f >>> 6 < a.words.size → a.test f = b.test f) : a = b := by
-  cases a with
-  | mk wa =>
-    cases b with
-    | mk wb =>
-      congr 1
-      apply Array.ext hsize
-      intro i hia hib
-      apply UInt64.toBitVec_inj.mp
-      apply BitVec.eq_of_getLsbD_eq
-      intro bit hbit
-      let f := i * 64 + bit
-      have hword : f >>> 6 = i := by
-        rw [shift_eq]
-        dsimp [f]
-        omega
-      have hmask : f &&& 63 = bit := by
-        rw [mask_eq]
-        dsimp [f]
-        omega
-      have ht := htest f (by simpa [hword] using hia)
-      simp only [test, hword, Array.getD_eq_getD_getElem?, hia, hib,
-        Array.getElem?_eq_getElem, word_test _ _ (by simpa [hmask] using hbit), hmask] at ht
-      exact ht
-
-/-- Read bit `b` directly from packed word `wordIndex`. -/
-theorem test_word_bit (s : State) (wordIndex b : Nat) (hb : b < 64) :
-    s.test (wordIndex * 64 + b) =
-      (s.words.getD wordIndex 0).toBitVec.getLsbD b := by
-  simp only [test, shift_eq, mask_eq]
-  have hdiv : (wordIndex * 64 + b) / 64 = wordIndex := by omega
-  have hmod : (wordIndex * 64 + b) % 64 = b := by omega
-  rw [hdiv, hmod, word_test _ _ hb]
-
 /-! ### Word counts -/
 
 @[simp] theorem size_insert (s : State) (f : Fact) :

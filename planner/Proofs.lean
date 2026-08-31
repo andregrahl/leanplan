@@ -4,7 +4,6 @@ Proofs about the planner.  Each file here corresponds to one file of `Planner/`.
 import Proofs.State
 import Proofs.Validation
 import Proofs.Task
-import Proofs.CompiledTask
 import Proofs.Finite
 import Proofs.Properties
 import Proofs.Combinators
@@ -30,8 +29,6 @@ import Proofs.ExampleHeuristics.Blind
 import Proofs.Search.OpenList
 import Proofs.Search.Node
 import Proofs.Search.AStar
-import Proofs.Search.CompiledAStar
-import Proofs.Search.SuccessorGenerator
 import Proofs.Search.Fuel
 import Proofs.Domains.BlocksworldSimple
 import Proofs.Domains.Blocksworld

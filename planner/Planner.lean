@@ -18,15 +18,12 @@ import Planner.Pddl.ParserTests
 import Planner.GeneratedDomains
 import Planner.State
 import Planner.Task
-import Planner.CompiledTask
 import Planner.ShapeAudit
 import Planner.Grounding
 import Planner.Distance
 import Planner.Search.Node
 import Planner.Search.OpenList
 import Planner.Search.AStar
-import Planner.Search.SuccessorGenerator
-import Planner.Search.CompiledAStar
 import Planner.ExampleHeuristics.Base
 import Planner.ExampleHeuristics.Blind
 import Planner.ExampleHeuristics.Certificate

@@ -66,10 +66,9 @@ private theorem foldl_hit {α : Type} {q : AtomOp} {o : α} (f : Array AtomOp �
 
 /-- Nothing already found is lost as the walk continues. -/
 theorem go_mono (types : Std.HashMap Name (Array Name)) (init : Std.HashSet GroundAtom)
-    (a : Action) (index : Std.HashMap Name (Array GroundAtom))
-    (dyn add del : List SlotAtom) (checkAt : Nat → List SlotAtom) :
+    (a : Action) (dyn add del : List SlotAtom) (checkAt : Nat → List SlotAtom) :
     ∀ (rest : List TypedName) (assign : Array Name) (acc : Array AtomOp) (q : AtomOp),
-      q ∈ acc → q ∈ groundSchema.go types init a index dyn add del checkAt rest assign acc := by
+      q ∈ acc → q ∈ groundSchema.go types init a dyn add del checkAt rest assign acc := by
   intro rest
   induction rest with
   | nil =>
@@ -82,7 +81,7 @@ theorem go_mono (types : Std.HashMap Name (Array Name)) (init : Std.HashSet Grou
       refine foldl_keep (q := q) _ ?_ _ acc hq
       intro acc' o hq'
       by_cases hchk : (checkAt (assign.push o).size).all
-          (staticCompatible init index (assign.push o))
+          (fun sl => init.contains (instantiateSlots (assign.push o) sl))
       · simp only [hchk, if_true]; exact ih _ _ q hq'
       · simp only [hchk, Bool.false_eq_true, if_false]; exact hq'
 
@@ -114,80 +113,6 @@ theorem instantiateSlots_prefix {params : List TypedName} {atom : Atom}
         Array.getElem?_eq_getElem hlt2]
       simpa using hpre.getElem hlt
 
-/-- Every initial fact occurs in its predicate bucket. -/
-theorem staticFactIndex_mem (init : Std.HashSet GroundAtom) {fact : GroundAtom}
-    (hfact : fact ∈ init.toList) :
-    fact ∈ (staticFactIndex init).getD fact.pred #[] := by
-  unfold staticFactIndex
-  have go : ∀ (facts : List GroundAtom) (index : Std.HashMap Name (Array GroundAtom)),
-      (fact ∈ facts ∨ fact ∈ index.getD fact.pred #[]) →
-      fact ∈ (facts.foldl (fun index atom =>
-        index.insert atom.pred ((index.getD atom.pred #[]).push atom)) index).getD
-          fact.pred #[] := by
-    intro facts
-    induction facts with
-    | nil =>
-        intro index h
-        simpa using h
-    | cons atom rest ih =>
-        intro index h
-        apply ih
-        rcases h with h | h
-        · rcases List.mem_cons.mp h with rfl | hrest
-          · exact Or.inr (by
-              rw [Std.HashMap.getD_insert]
-              simp)
-          · exact Or.inl hrest
-        · refine Or.inr ?_
-          rw [Std.HashMap.getD_insert]
-          split
-          · rename_i heq
-            have hp : atom.pred = fact.pred := by simpa using heq
-            rw [hp]
-            exact Array.mem_push.mpr (Or.inl h)
-          · exact h
-  exact go init.toList {} (Or.inl hfact)
-
-/-- A bound parameter reads the same value from every extending assignment. -/
-private theorem slot_matchesPrefix_full {assign full : Array Name}
-    (hpre : assign.toList <+: full.toList) (slot : Slot) :
-    slot.matchesPrefix assign
-      (match slot with | .param i => full.getD i "" | .obj name => name) = true := by
-  cases slot with
-  | obj name => simp [Slot.matchesPrefix]
-  | param i =>
-      by_cases hi : i < assign.size
-      · have hifull : i < full.size := by
-          have := hpre.length_le
-          simp only [Array.length_toList] at this
-          omega
-        rw [Slot.matchesPrefix, Array.getElem?_eq_getElem hi]
-        simp only [beq_iff_eq]
-        rw [Array.getD_eq_getD_getElem?, Array.getElem?_eq_getElem hifull]
-        simpa using (hpre.getElem (by simpa using hi)).symm
-      · have hnone : assign[i]? = none := Array.getElem?_eq_none (by omega)
-        simp [Slot.matchesPrefix, hnone]
-
-/-- Instantiating a full assignment supplies a witness for every prefix. -/
-private theorem slotsMatchPrefix_full {assign full : Array Name}
-    (hpre : assign.toList <+: full.toList) : ∀ slots : List Slot,
-    slotsMatchPrefix assign slots (slots.map fun
-      | .param i => full.getD i ""
-      | .obj name => name) = true := by
-  intro slots
-  induction slots with
-  | nil => rfl
-  | cons slot rest ih =>
-      simp only [List.map_cons, slotsMatchPrefix, Bool.and_eq_true]
-      exact ⟨slot_matchesPrefix_full hpre slot, ih⟩
-
-theorem matchesPrefix_instantiate {assign full : Array Name}
-    (hpre : assign.toList <+: full.toList) (slotAtom : SlotAtom) :
-    slotAtom.matchesPrefix assign (instantiateSlots full slotAtom) = true := by
-  unfold SlotAtom.matchesPrefix instantiateSlots
-  simp only [beq_self_eq_true, Bool.true_and]
-  exact slotsMatchPrefix_full hpre slotAtom.slots.toList
-
 /-! ### Every well-typed assignment is walked
 
 `go_complete` is the converse of `go_produced`: given objects for the parameters
@@ -202,7 +127,8 @@ that is `instantiateSlots_prefix`.
 
 theorem go_complete (types : Std.HashMap Name (Array Name)) (init : Std.HashSet GroundAtom)
     (a : Action) (checkAt : Nat → List SlotAtom) (dyn stat : List Atom)
-    (hcheck : ∀ k, checkAt k = stat.map (compileAtom a.params))
+    (hcheck : ∀ k, k ≤ a.params.length →
+      checkAt k = (stat.map (compileAtom a.params)).filter fun sl => sl.level == k)
     (full : Array Name) (hfull : full.size = a.params.length)
     (hstat : ∀ y ∈ stat,
       init.contains (instantiateSlots full (compileAtom a.params y)) = true) :
@@ -211,8 +137,7 @@ theorem go_complete (types : Std.HashMap Name (Array Name)) (init : Std.HashSet 
       assign.toList <+: full.toList →
       List.Forall₂ (fun (p : TypedName) (o : Name) => o ∈ types.getD p.type #[]) rest
         (full.toList.drop assign.size) →
-      mkOp a dyn full ∈ groundSchema.go types init a (staticFactIndex init)
-        (dyn.map (compileAtom a.params))
+      mkOp a dyn full ∈ groundSchema.go types init a (dyn.map (compileAtom a.params))
         (a.add.map (compileAtom a.params)) (a.del.map (compileAtom a.params))
         checkAt rest assign acc := by
   intro rest
@@ -243,31 +168,33 @@ theorem go_complete (types : Std.HashMap Name (Array Name)) (init : Std.HashSet 
             rw [hsplit, hdrop]
             simp
           have hpsz : (assign.push o).size = assign.size + 1 := by simp
-          -- Every static precondition has the finished assignment as a witness.
+          -- Every static check that becomes due here passes.
           have hchk : (checkAt (assign.push o).size).all
-              (staticCompatible init (staticFactIndex init) (assign.push o)) = true := by
+              (fun sl => init.contains (instantiateSlots (assign.push o) sl)) = true := by
             rw [List.all_eq_true]
             intro sl hsl
-            rw [hcheck] at hsl
-            have hmap := hsl
+            have hbound : (assign.push o).size ≤ a.params.length := by
+              have h1 : (full.toList.drop assign.size).length
+                  = full.toList.length - assign.size := List.length_drop
+              rw [hdrop] at h1
+              have h2 : assign.toList.length ≤ full.toList.length := hp.length_le
+              simp only [Array.length_toList, List.length_cons] at h1 h2
+              simp only [Array.size_push, ← hfull]
+              omega
+            rw [hcheck _ hbound, List.mem_filter] at hsl
+            obtain ⟨hmap, hlev⟩ := hsl
             rw [List.mem_map] at hmap
             obtain ⟨y, hy, rfl⟩ := hmap
-            unfold staticCompatible
-            split
-            · rename_i hle
-              rw [instantiateSlots_prefix hpush hle]
-              exact hstat y hy
-            · let fact := instantiateSlots full (compileAtom a.params y)
-              refine Array.any_eq_true'.mpr ⟨fact, ?_, matchesPrefix_instantiate hpush _⟩
-              change fact ∈ (staticFactIndex init).getD fact.pred #[]
-              apply staticFactIndex_mem
-              simpa using hstat y hy
+            have hle : (compileAtom a.params y).level ≤ (assign.push o).size := by
+              simp only [beq_iff_eq] at hlev; omega
+            rw [instantiateSlots_prefix hpush hle]
+            exact hstat y hy
           rw [groundSchema.go, ← Array.foldl_toList]
           refine foldl_hit (o := o) _ ?_ ?_ _ (by simpa using hmem) acc
           · intro acc' x hq
             by_cases hc : (checkAt (assign.push x).size).all
-                (staticCompatible init (staticFactIndex init) (assign.push x))
-            · simp only [hc, if_true]; exact go_mono _ _ _ _ _ _ _ _ _ _ _ _ hq
+                (fun sl => init.contains (instantiateSlots (assign.push x) sl))
+            · simp only [hc, if_true]; exact go_mono _ _ _ _ _ _ _ _ _ _ _ hq
             · simp only [hc, Bool.false_eq_true, if_false]; exact hq
           · intro acc'
             simp only [hchk, if_true]
@@ -363,13 +290,14 @@ theorem groundSchema_complete (d : Domain) (types : Std.HashMap Name (Array Name
       init.contains (instAtom a.params full.toList y) = true) :
     mkOp a (a.pre.filter fun x => !statics.contains x.pred) full
       ∈ groundSchema d types statics init a := by
-  have hcheck : ∀ k : Nat,
-      (fun (_ : Nat) => (a.pre.filter fun x => statics.contains x.pred).map
-        (compileAtom a.params)) k =
-      (a.pre.filter fun x => statics.contains x.pred).map
-        (compileAtom a.params) := by
-    intro k
-    rfl
+  have hcheck : ∀ k, k ≤ a.params.length →
+      ((Array.range (a.params.length + 1)).map fun level =>
+          ((a.pre.filter fun x => statics.contains x.pred).map
+            (compileAtom a.params)).filter fun sl => sl.level == level).getD k []
+        = (((a.pre.filter fun x => statics.contains x.pred)).map
+            (compileAtom a.params)).filter fun sl => sl.level == k := by
+    intro k hk
+    exact getD_map_range _ k (by omega) _ []
   have hstat' : ∀ y ∈ a.pre.filter fun x => statics.contains x.pred,
       init.contains (instantiateSlots full (compileAtom a.params y)) = true := by
     intro y hy
@@ -385,19 +313,14 @@ theorem groundSchema_complete (d : Domain) (types : Std.HashMap Name (Array Name
     simpa using hcand
   · rw [List.all_eq_true]
     intro sl hsl
-    have hmap := hsl
+    rw [hcheck 0 (by omega), List.mem_filter] at hsl
+    obtain ⟨hmap, hlev⟩ := hsl
     rw [List.mem_map] at hmap
     obtain ⟨y, hy, rfl⟩ := hmap
-    unfold staticCompatible
-    split
-    · rename_i hle
-      rw [instantiateSlots_prefix (full := full) (by simp) hle]
-      exact hstat' y hy
-    · let fact := instantiateSlots full (compileAtom a.params y)
-      refine Array.any_eq_true'.mpr ⟨fact, ?_, matchesPrefix_instantiate (by simp) _⟩
-      change fact ∈ (staticFactIndex init).getD fact.pred #[]
-      apply staticFactIndex_mem
-      simpa using hstat' y hy
+    have hle : (compileAtom a.params y).level ≤ (#[] : Array Name).size := by
+      simp only [beq_iff_eq] at hlev; simp [hlev]
+    rw [instantiateSlots_prefix (full := full) (by simp) hle]
+    exact hstat' y hy
 
 /-- And so the grounder, before pruning, emits the operator for every instance. -/
 theorem groundedOps_complete (d : Domain) (p : Problem) {a : Action} (ha : a ∈ d.actions)
@@ -731,12 +654,11 @@ reading everything `:init` said.
 -/
 
 private theorem go_pre_pred (types : Std.HashMap Name (Array Name))
-    (init : Std.HashSet GroundAtom) (a : Action)
-    (index : Std.HashMap Name (Array GroundAtom)) (dyn add del : List SlotAtom)
+    (init : Std.HashSet GroundAtom) (a : Action) (dyn add del : List SlotAtom)
     (checkAt : Nat → List SlotAtom) :
     ∀ (rest : List TypedName) (assign : Array Name) (acc : Array AtomOp),
       (∀ op ∈ acc, ∀ x ∈ op.pre, ∃ y ∈ dyn, x.pred = y.pred) →
-      ∀ op ∈ groundSchema.go types init a index dyn add del checkAt rest assign acc,
+      ∀ op ∈ groundSchema.go types init a dyn add del checkAt rest assign acc,
         ∀ x ∈ op.pre, ∃ y ∈ dyn, x.pred = y.pred := by
   intro rest
   induction rest with
@@ -758,8 +680,8 @@ private theorem go_pre_pred (types : Std.HashMap Name (Array Name))
           ∀ q ∈ l.foldl (fun acc o =>
               let assign := assign.push o
               if (checkAt assign.size).all
-                  (staticCompatible init index assign)
-              then groundSchema.go types init a index dyn add del checkAt rest assign acc
+                  (fun sl => init.contains (instantiateSlots assign sl))
+              then groundSchema.go types init a dyn add del checkAt rest assign acc
               else acc) acc', ∀ x ∈ q.pre, ∃ y ∈ dyn, x.pred = y.pred := by
         intro l
         induction l with
@@ -768,7 +690,7 @@ private theorem go_pre_pred (types : Std.HashMap Name (Array Name))
             intro acc' h q hq
             refine ihl _ ?_ q hq
             by_cases hchk : (checkAt (assign.push o).size).all
-                (staticCompatible init index (assign.push o))
+                (fun sl => init.contains (instantiateSlots (assign.push o) sl))
             · simp only [hchk, if_true]; exact ih _ _ h
             · simp only [hchk, Bool.false_eq_true, if_false]; exact h
       exact fold _ acc hacc op hop
@@ -781,8 +703,7 @@ theorem groundSchema_pre_dynamic (d : Domain) (types : Std.HashMap Name (Array N
   unfold groundSchema at hop
   simp only at hop
   split at hop
-  · obtain ⟨sl, hsl, hpred⟩ := go_pre_pred types init a (staticFactIndex init)
-      _ _ _ _ a.params #[] #[]
+  · obtain ⟨sl, hsl, hpred⟩ := go_pre_pred types init a _ _ _ _ a.params #[] #[]
       (by simp) op hop x hx
     rw [List.mem_map] at hsl
     obtain ⟨z, hz, rfl⟩ := hsl

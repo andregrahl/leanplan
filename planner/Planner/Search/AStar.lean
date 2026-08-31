@@ -168,8 +168,7 @@ def astar (t : Task) (heur : Heuristic) (fuel : Nat) : Result :=
 /-- Emit an opt-in progress line without changing the proved `loop` function. -/
 @[inline] def traceExpansionCheckpoint (interval : Nat) (s : Search) : Search :=
   if s.expanded > 0 && s.expanded % interval == 0 then
-    match dbgTrace s!"Expansion checkpoint: {s.expanded} state(s)." fun _ => () with
-    | () => s
+    dbgTrace s!"Expansion checkpoint: {s.expanded} state(s)." fun _ => s
   else s
 
 /-- `loop` with periodic expansion checkpoints for externally timed benchmarks. -/

@@ -304,10 +304,10 @@ assignment. -/
 theorem go_produced (d : Domain) (objects : List TypedName)
     (types : Std.HashMap Name (Array Name))
     (htypes : ∀ ty o, o ∈ types.getD ty #[] → WellTyped d objects ty o)
-    (init : Std.HashSet GroundAtom) (a : Action)
-    (index : Std.HashMap Name (Array GroundAtom)) (checkAt : Nat → List SlotAtom)
+    (init : Std.HashSet GroundAtom) (a : Action) (checkAt : Nat → List SlotAtom)
     (dyn : List Atom) (hdyn : ∀ y ∈ dyn, y ∈ a.pre) (stat : List Atom)
-    (hcheck : ∀ k, checkAt k = stat.map (compileAtom a.params)) :
+    (hcheck : ∀ k, k ≤ a.params.length →
+      checkAt k = (stat.map (compileAtom a.params)).filter fun sl => sl.level == k) :
     ∀ (rest : List TypedName) (assign : Array Name) (acc : Array AtomOp)
       (pfx : List TypedName), a.params = pfx ++ rest →
       List.Forall₂ (fun (p : TypedName) (o : Name) => WellTyped d objects p.type o)
@@ -315,7 +315,7 @@ theorem go_produced (d : Domain) (objects : List TypedName)
       (∀ y ∈ stat, (compileAtom a.params y).level ≤ assign.size →
         init.contains (instantiateSlots assign (compileAtom a.params y)) = true) →
       (∀ op ∈ acc, Produced d objects a dyn stat init op) →
-      ∀ op ∈ groundSchema.go types init a index (dyn.map (compileAtom a.params))
+      ∀ op ∈ groundSchema.go types init a (dyn.map (compileAtom a.params))
         (a.add.map (compileAtom a.params)) (a.del.map (compileAtom a.params))
         checkAt rest assign acc, Produced d objects a dyn stat init op := by
   intro rest
@@ -391,8 +391,8 @@ theorem go_produced (d : Domain) (objects : List TypedName)
           ∀ q ∈ l.foldl (fun acc o =>
               let assign := assign.push o
               if (checkAt assign.size).all
-                  (staticCompatible init index assign)
-              then groundSchema.go types init a index (dyn.map (compileAtom a.params))
+                  (fun sl => init.contains (instantiateSlots assign sl))
+              then groundSchema.go types init a (dyn.map (compileAtom a.params))
                 (a.add.map (compileAtom a.params)) (a.del.map (compileAtom a.params))
                 checkAt rest assign acc
               else acc) acc', Produced d objects a dyn stat init q := by
@@ -403,7 +403,7 @@ theorem go_produced (d : Domain) (objects : List TypedName)
             intro acc' hmem hacc' q hq
             refine ihl _ (fun x hx => hmem x (by simp [hx])) ?_ q hq
             by_cases hchk : (checkAt (assign.push o).size).all
-                (staticCompatible init index (assign.push o))
+                (fun sl => init.contains (instantiateSlots (assign.push o) sl))
             · simp only [hchk, if_true]
               refine ih (assign.push o) acc' (pfx ++ [p]) (by simp [hparams]) ?_ ?_ hacc'
               · have hwt : WellTyped d objects p.type o :=
@@ -413,15 +413,16 @@ theorem go_produced (d : Domain) (objects : List TypedName)
                 by_cases hle : (compileAtom a.params y).level ≤ assign.size
                 · rw [instantiateSlots_push hle]
                   exact hdone y hy hle
-                · have hle' : (compileAtom a.params y).level ≤ (assign.push o).size := hlev
+                · have hsz : (assign.push o).size = assign.size + 1 := by simp
+                  have heq : (compileAtom a.params y).level = (assign.push o).size := by
+                    omega
+                  have hbound : (assign.push o).size ≤ a.params.length := by
+                    rw [← heq]; exact compileAtom_level_le a.params y
                   have hin : compileAtom a.params y ∈ checkAt (assign.push o).size := by
-                    rw [hcheck]
-                    exact List.mem_map.mpr ⟨y, hy, rfl⟩
+                    rw [hcheck _ hbound, List.mem_filter]
+                    exact ⟨List.mem_map.mpr ⟨y, hy, rfl⟩, by simp [heq]⟩
                   rw [List.all_eq_true] at hchk
-                  have hc := hchk _ hin
-                  unfold staticCompatible at hc
-                  rw [if_pos hle'] at hc
-                  exact hc
+                  exact hchk _ hin
             · simp only [hchk, Bool.false_eq_true, if_false]
               exact hacc'
       exact fold _ acc (fun o ho => by simpa using ho) hacc op hop
@@ -438,19 +439,18 @@ theorem groundSchema_produced (d : Domain) (objects : List TypedName)
   simp only at hop
   split at hop
   · rename_i hzero
-    refine go_produced d objects types htypes init a (staticFactIndex init) _ _
+    refine go_produced d objects types htypes init a _ _
       (fun y hy => (List.mem_filter.mp hy).1)
       (a.pre.filter fun x => statics.contains x.pred) ?_
       a.params #[] #[] [] (by simp) (by simp) ?_ (by simp) op hop
-    · intro k
-      rfl
+    · intro k hk
+      exact getD_map_range _ k (by omega) _ []
     · intro y hy hlev
+      have hz : (compileAtom a.params y).level = 0 := by simpa using hlev
       rw [List.all_eq_true] at hzero
-      have hc := hzero (compileAtom a.params y)
-        (List.mem_map.mpr ⟨y, hy, rfl⟩)
-      unfold staticCompatible at hc
-      rw [if_pos hlev] at hc
-      exact hc
+      refine hzero _ ?_
+      rw [getD_map_range _ 0 (by omega) _ [], List.mem_filter]
+      exact ⟨List.mem_map.mpr ⟨y, hy, rfl⟩, by simp [hz]⟩
   · simp at hop
 
 /-- A `Produced` operator names an instance of the domain. -/

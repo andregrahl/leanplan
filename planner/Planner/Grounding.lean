@@ -63,49 +63,6 @@ def compileAtom (params : List TypedName) (atom : Atom) : SlotAtom :=
     | .obj _ => acc
   { pred := atom.pred, slots, level }
 
-/-- Initial static facts grouped by predicate for prefix-compatible lookup. -/
-def staticFactIndex (init : Std.HashSet GroundAtom) :
-    Std.HashMap Name (Array GroundAtom) :=
-  init.toList.foldl (init := {}) fun index atom =>
-    index.insert atom.pred ((index.getD atom.pred #[]).push atom)
-
-/-- A ground argument agrees with a constant or an already-bound parameter. -/
-@[inline] def Slot.matchesPrefix (assign : Array Name) (slot : Slot) (arg : Name) : Bool :=
-  match slot with
-  | .obj name => arg == name
-  | .param i =>
-      match assign[i]? with
-      | some name => arg == name
-      | none => true
-
-/-- Pairwise prefix matching, kept recursive so its witness property is reusable. -/
-def slotsMatchPrefix (assign : Array Name) : List Slot → List Name → Bool
-  | [], [] => true
-  | slot :: slots, arg :: args =>
-      slot.matchesPrefix assign arg && slotsMatchPrefix assign slots args
-  | _, _ => false
-
-/-- A static fact is a possible completion of the current partial assignment. -/
-@[inline] def SlotAtom.matchesPrefix (assign : Array Name) (slotAtom : SlotAtom)
-    (fact : GroundAtom) : Bool :=
-  slotAtom.pred == fact.pred &&
-    slotsMatchPrefix assign slotAtom.slots.toList fact.args
-
-/--
-Whether a static precondition can still hold under a partial assignment.
-
-Once all of its parameters are bound this deliberately uses the original exact
-hash-set check.  Before then, the predicate index supplies a witness whose
-constants and currently bound parameter positions agree.
--/
-@[inline] def staticCompatible (init : Std.HashSet GroundAtom)
-    (index : Std.HashMap Name (Array GroundAtom)) (assign : Array Name)
-    (slotAtom : SlotAtom) : Bool :=
-  if slotAtom.level ≤ assign.size then
-    init.contains (instantiateSlots assign slotAtom)
-  else
-    (index.getD slotAtom.pred #[]).any (slotAtom.matchesPrefix assign)
-
 /-- Objects of each declared type, including objects of its subtypes. -/
 def typeObjects (d : Domain) (objects : List TypedName) :
     Std.HashMap Name (Array Name) := Id.run do
@@ -147,13 +104,13 @@ def groundSchema (d : Domain) (types : Std.HashMap Name (Array Name))
     (statics : List Name) (init : Std.HashSet GroundAtom) (a : Action) : Array AtomOp :=
   let params := a.params
   let staticPre := a.pre.filter (statics.contains ·.pred) |>.map (compileAtom params)
-  let staticIndex := staticFactIndex init
   let dynamicPre := a.pre.filter (!statics.contains ·.pred) |>.map (compileAtom params)
   let addAtoms := a.add.map (compileAtom params)
   let delAtoms := a.del.map (compileAtom params)
-  -- Every extension is checked against all static atoms.  Unbound slots are
-  -- wildcards, so an impossible prefix is rejected at the earliest parameter.
-  let checkAt : Nat → List SlotAtom := fun _ => staticPre
+  -- Static atoms grouped by the parameter count at which they become checkable.
+  let byLevel : Array (List SlotAtom) :=
+    (Array.range (params.length + 1)).map fun level => staticPre.filter (·.level == level)
+  let checkAt : Nat → List SlotAtom := fun level => byLevel.getD level []
   let rec go : List TypedName → Array Name → Array AtomOp → Array AtomOp
     | [], assign, acc =>
         let pre := dedup ((dynamicPre.map (instantiateSlots assign)).toArray)
@@ -168,11 +125,11 @@ def groundSchema (d : Domain) (types : Std.HashMap Name (Array Name))
         let candidates := types.getD p.type #[]
         candidates.foldl (init := acc) fun acc o =>
           let assign := assign.push o
-          if (checkAt assign.size).all (staticCompatible init staticIndex assign)
+          if (checkAt assign.size).all (fun s => init.contains (instantiateSlots assign s))
           then go rest assign acc
           else acc
-  -- Reject schemas with no compatible static completion before enumeration.
-  if (checkAt 0).all (staticCompatible init staticIndex #[]) then
+  -- Ground atoms among the static preconditions (`level = 0`) are checked first.
+  if (checkAt 0).all (fun s => init.contains (instantiateSlots #[] s)) then
     go params #[] #[]
   else #[]
 

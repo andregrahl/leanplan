@@ -145,10 +145,6 @@ open Planner
 #print axioms Planner.astar_sound
 #print axioms Planner.astar_optimal
 #print axioms Planner.astar_complete
-#print axioms Planner.astarCompiled_sound
-#print axioms Planner.astarCompiled_optimal
-#print axioms Planner.astarCompiled_complete
-#print axioms Planner.astarCompiled_mono
 #print axioms Planner.astar_terminates
 #print axioms Planner.astar_decides
 #print axioms Planner.loop_complete

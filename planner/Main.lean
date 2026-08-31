@@ -201,7 +201,9 @@ def main (args : List String) : IO UInt32 := do
   (← IO.getStdout).flush
 
   let result ← IO.lazyPure fun _ =>
-    astarCompiled task heur defaultFuel options.expansionCheckpointInterval
+    match options.expansionCheckpointInterval with
+    | some interval => astarWithCheckpoints task heur defaultFuel interval
+    | none => astar task heur defaultFuel
   let t2 ← IO.monoNanosNow
 
   match result.outcome with
