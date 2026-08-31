@@ -1,16 +1,5 @@
-# Lean build output (planner/.lake is several gigabytes)
+# Lean build output.  planner/.lake holds mathlib and is several gigabytes.
 .lake/
 
-# Benchmarks and reference planners are fetched, not tracked.  See the README.
+# Where the README suggests putting the IPC benchmarks.
 benchmarks/
-reference-planners/
-
-# Python
-.venv/
-__pycache__/
-*.py[cod]
-
-# Planner output
-*.plan
-plan.txt
-*.soln
